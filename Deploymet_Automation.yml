@@ -1,0 +1,457 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: TriFork Evaluation
+Resources:
+  APIExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: LambdaInvokePolicyForAPIGateway
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'lambda:InvokeFunction'
+                Resource: '*'
+
+  LambdaBasicExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition: {}
+      Path: /
+      Policies:
+        - PolicyName: LambdaDynamodb
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:Query'
+                  - 'dynamodb:Scan'
+                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+
+  ItemsTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: CarModel
+      AttributeDefinitions:
+        - AttributeName: ID
+          AttributeType: S        
+      KeySchema:
+        - AttributeName: ID
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  ItemsTable2:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: CarPrice
+      AttributeDefinitions:
+        - AttributeName: ID
+          AttributeType: S        
+      KeySchema:
+        - AttributeName: ID
+          KeyType: HASH 
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  ItemsTable3:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: CarOptions
+      AttributeDefinitions:
+        - AttributeName: ID
+          AttributeType: S         
+      KeySchema:
+        - AttributeName: ID
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  ModelLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: ModelLambdaFunction
+      Handler: index.model
+      Runtime: python3.6
+      Role: !GetAtt LambdaBasicExecutionRole.Arn
+      Tags:
+        - Key: TriFork
+          Value: Created by Sathis Anarudhan.
+      Code:
+        ZipFile: |
+          import boto3
+
+          dynamodb = boto3.resource('dynamodb')
+
+          def model(event, context):
+            table_name = ('CarModel')
+            table = dynamodb.Table(table_name)
+
+            result = table.scan()
+            result_count = result['Count']
+            items = result['Items']
+
+            for item in items:
+              item_id = item['ID']
+              content = item['Car']
+              contents= item['Model']
+              print(f'Item {item_id}: {content}')
+
+            response = {
+              'statusCode': 200,
+              'body': f'{items}'
+
+              
+              }
+
+            return response
+
+  PriceLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: PriceLambdaFunction
+      Handler: index.price
+      Runtime: python3.6
+      Role: !GetAtt LambdaBasicExecutionRole.Arn
+      Tags:
+        - Key: CW
+          Value: Created by Anarudhan Sathis.
+      Code:
+        ZipFile: |
+          import boto3
+
+          dynamodb = boto3.resource('dynamodb')
+
+          def price(event, context):
+            table_name = ('CarPrice')
+            table = dynamodb.Table(table_name)
+
+            result = table.scan()
+            result_count = result['Count']
+            items = result['Items']
+
+            for item in items:
+              item_id = item['ID']
+              content = item['Car']
+              contents= item['Price']
+              print(f'Item {item_id}: {content}')
+
+            response = {
+              'statusCode': 200,
+              'body': f'{items}'
+
+              
+              }
+
+            return response
+
+  OptionsLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: OptionsLambdaFunction
+      Handler: index.options
+      Runtime: python3.6
+      Role: !GetAtt LambdaBasicExecutionRole.Arn
+      Tags:
+        - Key: TriFork
+          Value: Created by Sathis Anarudhan.
+      Code:
+        ZipFile: |
+          import boto3
+
+          dynamodb = boto3.resource('dynamodb')
+
+          def options(event, context):
+            table_name = ('CarOptions')
+            table = dynamodb.Table(table_name)
+
+            result = table.scan()
+            result_count = result['Count']
+            items = result['Items']
+
+            for item in items:
+              item_id = item['ID']
+              content = item['Car']
+              contents= item['Options']
+              print(f'Item {item_id}: {content}')
+
+            response = {
+              'statusCode': 200,
+              'body': f'{items}'
+
+              
+              }
+
+            return response
+
+  MainResource:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: RestAPI
+      Description: AWS RESTful API for Lambda integration.
+
+  ModelResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt MainResource.RootResourceId
+      PathPart: model
+      RestApiId: !Ref MainResource
+
+  ModelGET:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        Credentials: !GetAtt APIExecutionRole.Arn
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations"
+          - lambdaArn: !GetAtt ModelLambdaFunction.Arn
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: ''
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: '''*'''
+              method.response.header.Access-Control-Allow-Methods: '''POST,OPTIONS'''
+              method.response.header.Access-Control-Allow-Origin: '''*'''
+              method.response.header.Access-Control-Allow-Credentials: '''*'''
+        RequestTemplates:
+          application/json: $input.json('$')
+      ResourceId: !Ref ModelResource
+      RestApiId: !Ref MainResource
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Credentials: true
+          StatusCode: '200'
+
+  ModelGETEnableCORS:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ResourceId: !Ref ModelResource
+      RestApiId: !Ref MainResource
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+        Credentials: !GetAtt APIExecutionRole.Arn
+        Type: MOCK
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: '''*'''
+              method.response.header.Access-Control-Allow-Methods: '''POST,OPTIONS'''
+              method.response.header.Access-Control-Allow-Origin: '''*'''
+              method.response.header.Access-Control-Allow-Credentials: '''*'''
+            ResponseTemplates:
+              application/json: ''
+            StatusCode: '200'
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Credentials: true
+          StatusCode: '200'
+
+  APIDeploy:
+    Type: 'AWS::ApiGateway::Deployment'
+    DependsOn:
+      - ModelGET
+      - ModelGETEnableCORS
+      - PriceGET
+      - PriceGETEnableCORS
+      - OptionsGET
+      - OptionsGETEnableCORS
+    Properties:
+      RestApiId: !Ref MainResource
+      StageName: EvWorld
+
+  PriceResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt MainResource.RootResourceId
+      PathPart: price
+      RestApiId: !Ref MainResource
+
+  PriceGET:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        Credentials: !GetAtt APIExecutionRole.Arn
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations"
+          - lambdaArn: !GetAtt PriceLambdaFunction.Arn
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: ''
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: '''*'''
+              method.response.header.Access-Control-Allow-Methods: '''POST,OPTIONS'''
+              method.response.header.Access-Control-Allow-Origin: '''*'''
+              method.response.header.Access-Control-Allow-Credentials: '''*'''
+        RequestTemplates:
+          application/json: $input.json('$')
+      ResourceId: !Ref PriceResource
+      RestApiId: !Ref MainResource
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Credentials: true
+          StatusCode: '200'
+
+  PriceGETEnableCORS:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ResourceId: !Ref PriceResource
+      RestApiId: !Ref MainResource
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+        Credentials: !GetAtt APIExecutionRole.Arn
+        Type: MOCK
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: '''*'''
+              method.response.header.Access-Control-Allow-Methods: '''POST,OPTIONS'''
+              method.response.header.Access-Control-Allow-Origin: '''*'''
+              method.response.header.Access-Control-Allow-Credentials: '''*'''
+            ResponseTemplates:
+              application/json: ''
+            StatusCode: '200'
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Credentials: true
+          StatusCode: '200'
+
+  OptionsResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt MainResource.RootResourceId
+      PathPart: options
+      RestApiId: !Ref MainResource
+
+  OptionsGET:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        Credentials: !GetAtt APIExecutionRole.Arn
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations"
+          - lambdaArn: !GetAtt OptionsLambdaFunction.Arn
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: ''
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: '''*'''
+              method.response.header.Access-Control-Allow-Methods: '''POST,OPTIONS'''
+              method.response.header.Access-Control-Allow-Origin: '''*'''
+              method.response.header.Access-Control-Allow-Credentials: '''*'''
+        RequestTemplates:
+          application/json: $input.json('$')
+      ResourceId: !Ref OptionsResource
+      RestApiId: !Ref MainResource
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Credentials: true
+          StatusCode: '200'
+
+  OptionsGETEnableCORS:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ResourceId: !Ref OptionsResource
+      RestApiId: !Ref MainResource
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+        Credentials: !GetAtt APIExecutionRole.Arn
+        Type: MOCK
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: '''*'''
+              method.response.header.Access-Control-Allow-Methods: '''POST,OPTIONS'''
+              method.response.header.Access-Control-Allow-Origin: '''*'''
+              method.response.header.Access-Control-Allow-Credentials: '''*'''
+            ResponseTemplates:
+              application/json: ''
+            StatusCode: '200'
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Credentials: true
+          StatusCode: '200'
+
+Outputs:
+  APIGatewayEndpoint:
+    Description: >-
+      Browse this URL to invoke or get the response from the Lambda function
+      through Postman or Browser.
+    Value: !Sub >-
+      https://${MainResource}.execute-api.${AWS::Region}.amazonaws.com/EvWorld/{model/price/options}
